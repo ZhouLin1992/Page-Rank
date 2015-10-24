@@ -24,6 +24,8 @@ public class PageRank {
 	private static String N_sum = "";
 	private static String initialized = "false";
 	private static long oldConvergeCount = -1;
+	private static String edges_sum = "";
+
 
 
 	public static class CalNMapper
@@ -56,6 +58,40 @@ public class PageRank {
 		}
 	}
 
+
+public static class CalEdgesMapper
+	extends Mapper<Object,// input key
+	Text,  // input value
+	Text,  // output key
+	IntWritable> //output value
+	{
+		private final static IntWritable one = new IntWritable(1);
+		@Override
+		public void map(Object key, Text value, Context context)
+				throws IOException, InterruptedException {
+			String[] value_part = value.toString().split(" ");
+			context.write(new Text("b"), new IntWritable(value_part.length -1));
+
+		}
+	}
+
+	public static class CalEdgesReducer
+	extends Reducer<Text,IntWritable,IntWritable, NullWritable> {
+		private IntWritable edgesNum_result = new IntWritable();
+		@Override
+		public void reduce(Text key, Iterable<IntWritable> values,
+				Context context
+				) throws IOException, InterruptedException {
+
+			int edgesNum = 0;
+
+			for (IntWritable val : values){
+				edgesNum += val.get();
+			}
+			edgesNum_result.set(edgesNum);
+			context.write(edgesNum_result, null);
+		}
+	}
 
 	public static class PageRankMapper
 	extends Mapper<Object,// input key
@@ -225,6 +261,19 @@ public class PageRank {
 		job.waitForCompletion(true);
 	}
 
+	public static void CalEdgesDriver(String input, String output) throws IOException, ClassNotFoundException, InterruptedException {
+		Configuration conf = new Configuration();
+		Job job = new Job(conf);
+		job.setJarByClass(PageRank.class);
+		job.setMapperClass(CalEdgesMapper.class);
+		job.setReducerClass(CalEdgesReducer.class);
+		job.setOutputKeyClass(Text.class);
+		job.setOutputValueClass(IntWritable.class);
+		FileInputFormat.addInputPath(job, new Path(input));
+		FileOutputFormat.setOutputPath(job, new Path(output));
+		job.waitForCompletion(true);
+	}
+
 	public static boolean PageRankDriver(String input, String output) throws IOException, ClassNotFoundException, InterruptedException {
 		Configuration conf = new Configuration();
 		conf.set("N", N_sum); //conf.set: write into configuration file
@@ -288,6 +337,7 @@ public class PageRank {
 
 		String calNOutput = tmpDirName + "ntmp/";
 		String Nresult = resultDirName + "n.out";
+		String edgesNUM = resultDirName + "edgesnum";
 
 		FileSystem fs = FileSystem.get(new URI(otherArgs[1]), conf);
 
