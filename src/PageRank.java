@@ -22,10 +22,9 @@ import org.apache.hadoop.util.GenericOptionsParser;
 
 public class PageRank {
 	private static String N_sum = "";
-	private static String initialized = "false";
+	private static int iterCount = -1;
 	private static long oldConvergeCount = -1;
 	private static String edges_sum = "";
-
 
 
 	public static class CalNMapper
@@ -39,57 +38,102 @@ public class PageRank {
 		public void map(Object key, Text value, Context context)
 				throws IOException, InterruptedException {
 			context.write (new Text("a"),one);
+
 		}
 	}
 
 	public static class CalNReducer
-	extends Reducer<Text,IntWritable,IntWritable, NullWritable> {
-		private IntWritable result = new IntWritable();
+	extends Reducer<Text,IntWritable,IntWritable,NullWritable> {
+		private IntWritable N_result = new IntWritable();
 		@Override
 		public void reduce(Text key, Iterable<IntWritable> values,
 				Context context
 				) throws IOException, InterruptedException {
 			int N_sum = 0;
-			for (IntWritable val : values) {
+			for (IntWritable val : values){
 				N_sum += val.get();
 			}
-			result.set(N_sum);
-			context.write(result, null);
+			N_result.set(N_sum);
+			context.write(N_result,null);
 		}
+
 	}
 
 
-public static class CalEdgesMapper
+	public static class CalEdgesMapper
 	extends Mapper<Object,// input key
 	Text,  // input value
 	Text,  // output key
 	IntWritable> //output value
 	{
-		private final static IntWritable one = new IntWritable(1);
+//		private final static IntWritable one = new IntWritable(1);
+
 		@Override
 		public void map(Object key, Text value, Context context)
 				throws IOException, InterruptedException {
 			String[] value_part = value.toString().split(" ");
+//			context.write(new Text("a"), one);
 			context.write(new Text("b"), new IntWritable(value_part.length -1));
 
 		}
 	}
 
 	public static class CalEdgesReducer
-	extends Reducer<Text,IntWritable,IntWritable, NullWritable> {
-		private IntWritable edgesNum_result = new IntWritable();
+	extends Reducer<Text,IntWritable,Text,Text> {
+		private Text edgesNum_result = new Text();
+		private Text max_result = new Text();
+		private Text min_result = new Text();
+		private Text average_result = new Text();
+	//	private IntWritable N_result = new IntWritable();
 		@Override
 		public void reduce(Text key, Iterable<IntWritable> values,
 				Context context
 				) throws IOException, InterruptedException {
 
 			int edgesNum = 0;
+			int outDegree_max = 0;
+			int outDegree_min = 1;
+			double avg = 0.0;
+			int N_sum = 0;
 
-			for (IntWritable val : values){
-				edgesNum += val.get();
-			}
-			edgesNum_result.set(edgesNum);
-			context.write(edgesNum_result, null);
+//			if (key.equals("a")){
+//
+//				for (IntWritable val : values){
+//					N_sum += val.get();
+//				}
+//					N_result.set(N_sum);
+//					context.write(N_result,null);
+//
+//			}else{
+				for (IntWritable val : values){
+					edgesNum += val.get();
+					N_sum += 1;
+					if (val.get() > outDegree_max){
+						outDegree_max = val.get();
+					}
+					if (val.get() < outDegree_min){
+						outDegree_min = val.get();
+					}
+
+				}
+
+//				for (IntWritable val : values){
+//
+//					N_sum += 1;
+//
+//				}
+				avg = (double)edgesNum/ N_sum;
+//			}
+
+
+			edgesNum_result.set(Integer.toString(edgesNum));
+			max_result.set(Integer.toString(outDegree_max));
+			min_result.set(Integer.toString(outDegree_min));
+			average_result.set(Double.toString(avg));
+			context.write(new Text("total"), edgesNum_result);
+			context.write(new Text("max"), max_result);
+			context.write(new Text("min"), min_result);
+			context.write(new Text("average"), average_result);
 		}
 	}
 
@@ -104,8 +148,7 @@ public static class CalEdgesMapper
 				throws IOException, InterruptedException {
 			Configuration conf = context.getConfiguration();
 			String N = conf.get("N");    //passing parameters to Map
-			String initialized = conf.get("init_status");
-			if (initialized.equals("true")) {
+			if (iterCount >= 0) {
 				String[] parts = value.toString().split(" ", 3);
 				if (parts.length == 2){
 					context.write(new Text(parts[0]), new Text("$"));
@@ -146,13 +189,12 @@ public static class CalEdgesMapper
 				Context context
 				) throws IOException, InterruptedException {
 
+			if (iterCount < 0) {
+				context.write(key, values.iterator().next());
+				return;
+			}
 			Configuration conf = context.getConfiguration();
 			String N = conf.get("N");//passing parameters to Reduce
-			String initialized = conf.get("init_status");
-            if (initialized.equals("false")) {
-                context.write(key, values.iterator().next());
-                return;
-            }
 			// For a node A, There are 3 kinds of value pass to the reducer
 			// 1. Neighbour list of A(only one: either (A, null) or (A, the list)) starts with $
 			// 2. Old PageRank of A(only one), starts with #
@@ -247,10 +289,10 @@ public static class CalEdgesMapper
 
 
 
-	//
+	
 	public static void CalNDriver(String input, String output) throws IOException, ClassNotFoundException, InterruptedException {
 		Configuration conf = new Configuration();
-		Job job = new Job(conf);
+		Job job = Job.getInstance(conf);
 		job.setJarByClass(PageRank.class);
 		job.setMapperClass(CalNMapper.class);
 		job.setReducerClass(CalNReducer.class);
@@ -263,7 +305,8 @@ public static class CalEdgesMapper
 
 	public static void CalEdgesDriver(String input, String output) throws IOException, ClassNotFoundException, InterruptedException {
 		Configuration conf = new Configuration();
-		Job job = new Job(conf);
+		Job job = Job.getInstance(conf);
+		job.setNumReduceTasks(1);
 		job.setJarByClass(PageRank.class);
 		job.setMapperClass(CalEdgesMapper.class);
 		job.setReducerClass(CalEdgesReducer.class);
@@ -273,13 +316,11 @@ public static class CalEdgesMapper
 		FileOutputFormat.setOutputPath(job, new Path(output));
 		job.waitForCompletion(true);
 	}
-
 	public static boolean PageRankDriver(String input, String output) throws IOException, ClassNotFoundException, InterruptedException {
 		Configuration conf = new Configuration();
 		conf.set("N", N_sum); //conf.set: write into configuration file
-		conf.set("init_status", initialized);
 		conf.set("mapreduce.output.textoutputformat.separator", " ");
-		Job job = new Job(conf);
+		Job job = Job.getInstance(conf);
 		job.setJarByClass(PageRank.class);
 		job.setMapperClass(PageRankMapper.class);
 		job.setReducerClass(PageRankReducer.class);
@@ -303,7 +344,7 @@ public static class CalEdgesMapper
 
 	public static void SortDriver(String input, String output) throws IOException, ClassNotFoundException, InterruptedException {
 		Configuration conf = new Configuration();
-		Job job = new Job(conf);
+		Job job = Job.getInstance(conf);
 		job.setNumReduceTasks(1);
 		job.setSortComparatorClass(DescendingKeyComparator.class);
 		job.setJarByClass(PageRank.class);
@@ -326,30 +367,45 @@ public static class CalEdgesMapper
 		}
 		String bucketName = otherArgs[1];
 		String tmpDirName = bucketName + "tmp/";
-		String resultDirName = bucketName +"result/";
-		if (otherArgs[0].contains("small")) {
-		    resultDirName +="small/";
-		} else if (otherArgs[0].contains("medium")) {
-		    resultDirName += "medium/";
-		} else if (otherArgs[0].contains("large")) {
-		    resultDirName += "large /";
-		}
-
+		String resultDirName = bucketName + "result/";
 		String calNOutput = tmpDirName + "ntmp/";
 		String Nresult = resultDirName + "n.out";
-		String edgesNUM = resultDirName + "edgesnum";
 
 		FileSystem fs = FileSystem.get(new URI(otherArgs[1]), conf);
+		if (fs.exists(new Path(tmpDirName))){
+			fs.delete(new Path(tmpDirName), true);
+		}
+		
+		if (fs.exists(new Path(resultDirName))){
+			fs.delete(new Path(resultDirName), true);
+		}
+		
 
 		PageRank.CalNDriver(otherArgs[0], calNOutput);
 		FileUtil.copyMerge(fs, new Path(calNOutput), fs, new Path(Nresult), false, conf, "");
 
-
+		String calEdgesOutput = resultDirName + "Edges_Property/";
+		String edgesProperty = resultDirName + "edgesProperty.out";
+	
+		PageRank.CalEdgesDriver(otherArgs[0], calEdgesOutput);
+		FileUtil.copyMerge(fs, new Path(calEdgesOutput), fs, new Path(edgesProperty), false, conf, "");
+		
 		BufferedReader br = new BufferedReader(new InputStreamReader(fs.open(new Path(Nresult))));
-		N_sum = br.readLine(); // read a file from HDFS in Hadoop
+		N_sum = br.readLine();
+//		String line = null;
+//		while ((line = br.readLine()) != null) {
+//			String[] RL = line.split("\t"); //read a file from HDFS in Hadoop
+//			if (RL[0] == "&"){
+//				N_sum = RL[1];
+//			}else{
+//				edges_sum = RL[1];
+//			}
+//		}
+
+
+
 		PageRank.PageRankDriver(otherArgs[0], tmpDirName + "iter0");
-		int iterCount = 0;
-		initialized = "true";
+		iterCount++;
 		boolean iterate = true;
 		while (iterate) {
 			iterate = PageRank.PageRankDriver(tmpDirName + "iter" + iterCount, tmpDirName + "iter" + (iterCount + 1));
