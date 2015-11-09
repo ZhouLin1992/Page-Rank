@@ -22,9 +22,8 @@ import org.apache.hadoop.util.GenericOptionsParser;
 
 public class PageRank {
 	private static String N_sum = "";
-	private static int iterCount = -1;
+	private static String initialized = "false";
 	private static long oldConvergeCount = -1;
-	private static String edges_sum = "";
 
 
 	public static class CalNMapper
@@ -148,7 +147,8 @@ public class PageRank {
 				throws IOException, InterruptedException {
 			Configuration conf = context.getConfiguration();
 			String N = conf.get("N");    //passing parameters to Map
-			if (iterCount >= 0) {
+			String initialized = conf.get("init_status");
+			if (initialized.equals("true")) {
 				String[] parts = value.toString().split(" ", 3);
 				if (parts.length == 2){
 					context.write(new Text(parts[0]), new Text("$"));
@@ -189,12 +189,13 @@ public class PageRank {
 				Context context
 				) throws IOException, InterruptedException {
 
-			if (iterCount < 0) {
+			Configuration conf = context.getConfiguration();
+			String N = conf.get("N");//passing parameters to Reduce
+			String initialized = conf.get("init_status");
+			if (initialized.equals("false")){
 				context.write(key, values.iterator().next());
 				return;
 			}
-			Configuration conf = context.getConfiguration();
-			String N = conf.get("N");//passing parameters to Reduce
 			// For a node A, There are 3 kinds of value pass to the reducer
 			// 1. Neighbour list of A(only one: either (A, null) or (A, the list)) starts with $
 			// 2. Old PageRank of A(only one), starts with #
@@ -319,6 +320,7 @@ public class PageRank {
 	public static boolean PageRankDriver(String input, String output) throws IOException, ClassNotFoundException, InterruptedException {
 		Configuration conf = new Configuration();
 		conf.set("N", N_sum); //conf.set: write into configuration file
+		conf.set("init_status", initialized);
 		conf.set("mapreduce.output.textoutputformat.separator", " ");
 		Job job = Job.getInstance(conf);
 		job.setJarByClass(PageRank.class);
@@ -359,6 +361,10 @@ public class PageRank {
 
 
 	public static void main(String[] args) throws Exception {
+		long begintime=0;
+		long endtime=0;
+		long costtime=0;
+		begintime=System.nanoTime();
 		Configuration conf = new Configuration();
 		String[] otherArgs = new GenericOptionsParser(conf, args).getRemainingArgs();
 		if (otherArgs.length != 2) {
@@ -405,7 +411,8 @@ public class PageRank {
 
 
 		PageRank.PageRankDriver(otherArgs[0], tmpDirName + "iter0");
-		iterCount++;
+		int iterCount = 0;
+		initialized = "true";
 		boolean iterate = true;
 		while (iterate) {
 			iterate = PageRank.PageRankDriver(tmpDirName + "iter" + iterCount, tmpDirName + "iter" + (iterCount + 1));
@@ -415,5 +422,8 @@ public class PageRank {
 		String sortResult = resultDirName + "pagerank.out";
 		PageRank.SortDriver(tmpDirName + "iter" + iterCount, sortOutput);
 		FileUtil.copyMerge(fs, new Path(sortOutput), fs, new Path(sortResult), false, conf, "");
+		endtime=System.nanoTime();
+		costtime=(endtime-begintime)/1000/1000;
+		System.out.println("The execution time is: "+costtime+"ms");
 	}
 }
